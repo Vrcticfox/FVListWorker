@@ -43,8 +43,14 @@ def publish(paths, message):
     repo = os.environ["GITHUB_REPOSITORY"]
     # GITHUB_TOKEN으로 push하면 Pages가 자동 실행되지 않아 명시적으로 요청한다.
     api(f"repos/{repo}/pages/builds", "POST")
+    wait_for_pages(repo, commit)
+
+
+def wait_for_pages(repo, commit, attempts=60):
+    """동일 커밋에 빌드가 여러 개 생겨도 성공한 배포를 기다린다."""
     checked = {}
-    for _ in range(60):
+    last_error = ""
+    for attempt in range(attempts):
         builds = api(f"repos/{repo}/pages/builds?per_page=30")
         for build in builds:
             revision = build.get("commit")
@@ -61,9 +67,15 @@ def publish(paths, message):
                 if build["status"] == "built":
                     return
                 if build["status"] == "errored":
-                    raise RuntimeError("Pages 빌드 실패: Actions/Pages 로그를 확인하세요.")
-        time.sleep(10)
-    raise RuntimeError("Pages 배포 완료 확인 시간 초과")
+                    # 실패한 기록 하나가 다른 진행 중 빌드까지 실패했다는 뜻은 아니다.
+                    message = (build.get("error") or {}).get("message") or "상세 오류 없음"
+                    detail = f"{build.get('url', revision)}: {message}"
+                    if detail != last_error:
+                        print(f"Pages 실패 기록 확인, 다른 빌드 완료 대기: {detail}", flush=True)
+                    last_error = detail
+        if attempt + 1 < attempts:
+            time.sleep(10)
+    raise RuntimeError("Pages 배포 완료 확인 시간 초과" + (f"; 최근 실패: {last_error}" if last_error else ""))
 
 
 def main():

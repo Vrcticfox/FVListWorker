@@ -6,13 +6,32 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import publish_fvlist
 
 
 class PublishTests(unittest.TestCase):
+    def test_failed_build_does_not_hide_later_success(self):
+        failed = {"commit": "abc", "status": "errored", "error": {"message": "Page build failed."}}
+        succeeded = {"commit": "abc", "status": "built"}
+        for responses in ([[failed], [succeeded, failed]], [[failed, succeeded]]):
+            with self.subTest(responses=responses), \
+                 patch.object(publish_fvlist, "api", side_effect=responses), \
+                 patch.object(publish_fvlist, "run"), \
+                 patch.object(publish_fvlist.subprocess, "run", return_value=Mock(returncode=0)), \
+                 patch.object(publish_fvlist.time, "sleep"):
+                publish_fvlist.wait_for_pages("example/repo", "abc", attempts=2)
+
+    def test_failed_builds_still_timeout(self):
+        with patch.object(publish_fvlist, "api", return_value=[{"commit": "abc", "status": "errored", "error": {"message": "bad build"}}]), \
+             patch.object(publish_fvlist, "run"), \
+             patch.object(publish_fvlist.subprocess, "run", return_value=Mock(returncode=0)), \
+             patch.object(publish_fvlist.time, "sleep"):
+            with self.assertRaisesRegex(RuntimeError, "bad build"):
+                publish_fvlist.wait_for_pages("example/repo", "abc", attempts=2)
+
     def test_git_publish_preserves_catalog_and_unrelated_files(self):
         # 실제 원격 대신 임시 bare 저장소에서 파일 보존과 두 단계 커밋을 확인한다.
         def git(*args, cwd=None):
