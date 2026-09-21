@@ -1,0 +1,64 @@
+name: build FVList Data
+
+on:
+  push:
+    paths:
+      - 'vrchat/ProjectFV/BaseFile/FVBase.csv'
+  workflow_dispatch:
+
+# 실행 중인 릴리스는 중단하지 않고, 대기 중 변경사항은 최신 실행으로 합친다.
+concurrency:
+  group: fvlist-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pages: write
+
+jobs:
+  build:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      FV_SOURCE: vrchat/ProjectFV/BaseFile/FVBase.csv
+      FV_CURRENT: vrchat/ProjectFV/ImageLoading/FVList.json
+      FV_USER_AGENT: ProjectFV/1.0 (https://github.com/${{ github.repository }})
+    steps:
+      - name: 실행 시점의 최신 원본 가져오기
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 이미지 라이브러리 설치
+        run: python -m pip install -r requirements.txt
+
+      - name: 오프라인 검증
+        run: python -m unittest discover -s tests -v
+
+      - name: FVList 및 비활성 뱅크 생성
+        run: >-
+          python scripts/build_fvlist.py
+          --source "$FV_SOURCE"
+          --current "$FV_CURRENT"
+          --output build/staged
+
+      - name: 생성 결과 보관
+        uses: actions/upload-artifact@v4
+        with:
+          name: fvlist-candidate
+          path: build/staged/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: 이미지 선배포 및 JSON 전환
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/publish_fvlist.py
+
