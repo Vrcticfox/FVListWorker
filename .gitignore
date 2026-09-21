@@ -2,4 +2,3 @@ __pycache__/
 .venv/
 build/
 .pytest_cache/
-tests/
