@@ -77,14 +77,22 @@ def read_current_catalog(path: Path | None) -> tuple[str, int]:
     if path is None or not path.exists():
         return "A", 0
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
         bank = data["atlasBank"]
-        release = data["releaseId"]
+        if "releaseId" in data:
+            release = data["releaseId"]
+        else:
+            release = data["contentVersion"]
+            if type(bank) is int and bank in (0, 1):
+                bank = ("A", "B")[bank]
         if bank not in ("A", "B") or type(release) is not int or release < 0:
             raise ValueError
         return bank, release
-    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
-        raise ValueError(f"current catalog is malformed: {path}") from exc
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        raise ValueError(
+            f"current catalog is malformed: {path}; "
+            'expected releaseId + atlasBank A/B, or legacy contentVersion + atlasBank 0/1'
+        ) from exc
 
 
 def _request_bytes(url: str, user_agent: str, timeout: float = 30.0, retries: int = 3) -> bytes:

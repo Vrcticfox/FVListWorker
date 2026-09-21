@@ -1,4 +1,5 @@
 import csv
+import json
 import importlib.util
 import sys
 import tempfile
@@ -15,6 +16,27 @@ SPEC.loader.exec_module(MODULE)
 
 
 class BuildFvListTests(unittest.TestCase):
+    def test_previous_catalog_formats(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "FVList.json"
+            for data, expected in [
+                ({"contentVersion": 1, "atlasBank": 0}, ("A", 1)),
+                ({"contentVersion": 5, "atlasBank": 1}, ("B", 5)),
+                ({"releaseId": 6, "atlasBank": "A"}, ("A", 6)),
+            ]:
+                with self.subTest(data=data):
+                    path.write_text(json.dumps(data), encoding="utf-8-sig")
+                    self.assertEqual(MODULE.read_current_catalog(path), expected)
+            for data in [
+                {"contentVersion": 1, "atlasBank": 2},
+                {"contentVersion": 1, "atlasBank": True},
+                {"releaseId": "1", "atlasBank": "A"},
+            ]:
+                with self.subTest(data=data):
+                    path.write_text(json.dumps(data), encoding="utf-8")
+                    with self.assertRaises(ValueError):
+                        MODULE.read_current_catalog(path)
+
     def write_csv(self, path, rows, header=False):
         with path.open("w", encoding="utf-8-sig", newline="") as stream:
             writer = csv.writer(stream)
