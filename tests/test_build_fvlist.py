@@ -4,6 +4,7 @@ import importlib.util
 import sys
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 
 from PIL import Image
@@ -16,6 +17,57 @@ SPEC.loader.exec_module(MODULE)
 
 
 class BuildFvListTests(unittest.TestCase):
+    def test_missing_worlds_keep_atlas_and_catalog_aligned(self):
+        # 16개 경계 바로 앞의 월드를 제외해 다음 페이지/셀도 함께 당겨지는지 확인한다.
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "base.csv"
+            rows = [[f"wrld_{i:08x}-1111-2222-3333-444444444444", "Tag", str(i)] for i in range(18)]
+            self.write_csv(source, rows)
+            def world_fetcher(world_id, _):
+                i = int(world_id[5:13], 16)
+                if i == 15:
+                    raise urllib.error.HTTPError("https://example.invalid/world", 404, "missing", {}, None)
+                return {"name": str(i), "capacity": 16, "imageUrl": str(i)}
+            def image_fetcher(url, _):
+                return Image.new("RGB", (512, 512), (int(url) * 10, 0, 0))
+            result = MODULE.build_release(source, None, root / "out", "test", world_fetcher=world_fetcher, image_fetcher=image_fetcher)
+            self.assertEqual(result["worldCount"], 17)
+            self.assertEqual(result["worlds"][15]["worldName"], "16")
+            self.assertEqual(result["worlds"][16]["worldName"], "17")
+            with Image.open(root / "out/FVDetailA_01.jpg") as atlas:
+                self.assertAlmostEqual(atlas.getpixel((256, 256))[0], 170, delta=3)
+
+    def test_image_404_skips_and_all_missing_produces_empty_catalog(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "base.csv"
+            self.write_csv(source, [["wrld_00000000-1111-2222-3333-444444444444", "", ""]])
+            def missing(*_):
+                raise urllib.error.HTTPError("https://example.invalid", 404, "missing", {}, None)
+            for is_image_missing in (False, True):
+                output = root / str(is_image_missing)
+                result = MODULE.build_release(source, None, output, "test",
+                    world_fetcher=(lambda *_: {"name": "World", "capacity": 1, "imageUrl": "image"}) if is_image_missing else missing,
+                    image_fetcher=missing)
+                self.assertEqual(result["worlds"], [])
+                self.assertEqual(result["previewPageCount"], 0)
+                self.assertEqual(result["detailPageCount"], 0)
+                self.assertEqual(list(output.glob("*.jpg")), [])
+
+    def test_other_http_errors_still_abort(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "base.csv"
+            self.write_csv(source, [["wrld_00000000-1111-2222-3333-444444444444", "", ""]])
+            for code in (401, 403, 429, 500):
+                def failure(*_):
+                    raise urllib.error.HTTPError("https://example.invalid", code, "error", {}, None)
+                output = root / str(code)
+                with self.assertRaises(urllib.error.HTTPError):
+                    MODULE.build_release(source, None, output, "test", world_fetcher=failure)
+                self.assertFalse((output / "FVList.json").exists())
+
     def test_previous_catalog_formats(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "FVList.json"

@@ -78,10 +78,15 @@ def main():
     # 이전 실행이 JSON 전환 직후 중단됐을 수도 있으므로 재사용 전에 항상 기다린다.
     print("이전 뱅크 보호 대기: 15분", flush=True)
     time.sleep(WAIT_SECONDS)
-    publish(sorted(STAGED.glob("FV*.jpg")), "Update FVList inactive atlas bank")
-    print("이미지 배포 후 전파 대기: 15분", flush=True)
-    time.sleep(WAIT_SECONDS)
-    verify_public(STAGED, public_url)
+    candidate = json.loads((STAGED / "FVList.json").read_text(encoding="utf-8"))
+    if candidate.get("worlds") == [] and candidate.get("worldCount") == 0 and candidate.get("previewPageCount") == 0 and candidate.get("detailPageCount") == 0:
+        # 모든 월드가 내려간 경우도 정상 결과다. 이미지는 그대로 두고 빈 목록만 공개한다.
+        print("표시 가능한 월드가 없어 빈 목록을 공개합니다.", flush=True)
+    else:
+        publish(sorted(STAGED.glob("FV*.jpg")), "Update FVList inactive atlas bank")
+        print("이미지 배포 후 전파 대기: 15분", flush=True)
+        time.sleep(WAIT_SECONDS)
+        verify_public(STAGED, public_url)
     publish([STAGED / "FVList.json"], "Publish FVList catalog")
     print("FVList 공개 완료. 다음 실행 시작 시 이전 뱅크 보호 시간을 적용합니다.", flush=True)
 

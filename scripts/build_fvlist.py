@@ -203,9 +203,6 @@ def build_release(source: Path, current: Path | None, output: Path, user_agent: 
     worlds = read_base_csv(source)
     active_bank, previous_release = read_current_catalog(current)
     target_bank = "A" if current is None or not current.exists() else ("B" if active_bank == "A" else "A")
-    detail_pages = (len(worlds) + 15) // 16
-    if detail_pages > max_detail_pages:
-        raise ValueError(f"world list needs {detail_pages} detail pages; limit is {max_detail_pages}")
 
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
@@ -214,12 +211,26 @@ def build_release(source: Path, current: Path | None, output: Path, user_agent: 
     images: list[Image.Image] = []
     for index, base in enumerate(worlds):
         print(f"월드 정보 수집 중: {index + 1}/{len(worlds)} {base.world_id}", flush=True)
-        api = world_fetcher(base.world_id, user_agent)
-        records.append(_api_record(base, api, index))
-        images.append(square_cover(image_fetcher(records[-1].pop("_imageUrl"), user_agent), DETAIL_INNER))
+        stage = "월드 정보 조회"
+        try:
+            api = world_fetcher(base.world_id, user_agent)
+            record = _api_record(base, api, index)
+            stage = "월드 이미지 조회"
+            image = square_cover(image_fetcher(record.pop("_imageUrl"), user_agent), DETAIL_INNER)
+        except urllib.error.HTTPError as exc:
+            if exc.code != 404:
+                raise
+            # 제작자가 내린 월드는 결과에서만 제외한다. CSV는 남겨 다음 실행 때 다시 조회한다.
+            print(f"[경고] {stage} 404: {base.world_id} 제외", flush=True)
+            continue
+        # 두 자료가 모두 준비된 경우에만 추가해야 JSON과 아틀라스 순서가 일치한다.
+        records.append(record)
+        images.append(image)
 
     preview_pages = (len(images) + 63) // 64
     detail_pages = (len(images) + 15) // 16
+    if detail_pages > max_detail_pages:
+        raise ValueError(f"world list needs {detail_pages} detail pages; limit is {max_detail_pages}")
     for page in range(preview_pages):
         start = page * 64
         atlas = make_atlas(images, start, min(64, len(images) - start), PREVIEW_COLUMNS, PREVIEW_ROWS, PREVIEW_INNER, PREVIEW_SIZE)

@@ -51,7 +51,7 @@ class PublishTests(unittest.TestCase):
             finally:
                 os.chdir(previous)
 
-    def run_publish(self, is_valid):
+    def run_publish(self, is_valid, is_empty=False):
         events = []
         settings = {"build_type": "legacy", "source": {"branch": "main", "path": "/"},
                     "html_url": "https://vrcticfox.github.io/ExternalResources/"}
@@ -64,6 +64,7 @@ class PublishTests(unittest.TestCase):
         with patch.dict(os.environ, {"GITHUB_REPOSITORY": "Vrcticfox/ExternalResources"}), \
              patch.object(publish_fvlist, "api", return_value=settings), \
              patch.object(publish_fvlist, "run"), \
+             patch.object(Path, "read_text", return_value='{"worlds":[],"worldCount":0,"previewPageCount":0,"detailPageCount":0}' if is_empty else '{"worldCount":1}'), \
              patch.object(publish_fvlist.time, "sleep", side_effect=lambda seconds: events.append("wait")), \
              patch.object(publish_fvlist, "verify_public", side_effect=verify), \
              patch.object(publish_fvlist, "publish", side_effect=lambda paths, message: events.append(message)):
@@ -79,6 +80,9 @@ class PublishTests(unittest.TestCase):
 
     def test_stale_image_never_promotes_catalog(self):
         self.assertNotIn("Publish FVList catalog", self.run_publish(False))
+
+    def test_all_missing_publishes_empty_catalog_without_images(self):
+        self.assertEqual(self.run_publish(True, is_empty=True), ["wait", "Publish FVList catalog"])
 
     def test_wrong_pages_source_stops_before_writes(self):
         with patch.dict(os.environ, {"GITHUB_REPOSITORY": "example/repo"}), \
